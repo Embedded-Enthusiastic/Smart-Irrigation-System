@@ -1,0 +1,91 @@
+#include <WiFi.h>          // Include the Wi-Fi library
+#include <HTTPClient.h>    // Library for HTTP requests
+
+// Wi-Fi credentials (Make sure to replace these with your details)
+const char* wifiSSID = "YOUR_WIFI_SSID";
+const char* wifiPassword = "YOUR_WIFI_PASSWORD";
+
+// Pin configuration
+const int soilSensorPin = 34;  // Analog pin for soil moisture sensor
+const int pumpRelayPin = 25;   // Digital pin to control the water pump relay
+
+// Moisture level threshold to decide when to water (adjustable)
+const int drySoilThreshold = 450;  // Custom value based on sensor calibration
+
+// Timer settings for deep sleep (adjustable)
+const int sleepDurationMinutes = 5;  // Sleep duration in minutes
+
+// Function prototypes
+void setupWiFi();
+void sendToCloud(int moistureLevel);
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(pumpRelayPin, OUTPUT);
+  digitalWrite(pumpRelayPin, LOW);  // Keep the water pump off initially
+
+  // Establish Wi-Fi connection
+  setupWiFi();
+}
+
+void loop() {
+  // Read and print the soil moisture level
+  int moistureLevel = analogRead(soilSensorPin);
+  Serial.println("Current Soil Moisture: " + String(moistureLevel));
+
+  // Determine if watering is necessary
+  if (moistureLevel < drySoilThreshold) {
+    Serial.println("Dry soil detected! Activating water pump...");
+    digitalWrite(pumpRelayPin, HIGH);  // Turn on the water pump
+    delay(8000);  // Water the plants for 8 seconds (customized duration)
+    digitalWrite(pumpRelayPin, LOW);   // Turn off the pump
+  } else {
+    Serial.println("Soil moisture is sufficient. No watering needed.");
+  }
+
+  // Send the moisture level to the cloud
+  sendToCloud(moistureLevel);
+
+  // Enter deep sleep mode for energy efficiency
+  Serial.println("Entering deep sleep for " + String(sleepDurationMinutes) + " minutes...");
+  esp_sleep_enable_timer_wakeup(sleepDurationMinutes * 60 * 1000000); // Sleep for specified duration
+  esp_deep_sleep_start();
+}
+
+// Function to connect to Wi-Fi
+void setupWiFi() {
+  Serial.print("Connecting to Wi-Fi...");
+  WiFi.begin(wifiSSID, wifiPassword);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi Connected!");
+}
+
+// Function to send data to a cloud server
+void sendToCloud(int moistureLevel) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient httpClient;
+    httpClient.begin("http://your-custom-cloud-api.com/data");  // Replace with your cloud API URL
+    httpClient.addHeader("Content-Type", "application/json");
+
+    // Create a detailed JSON payload
+    String jsonData = "{";
+    jsonData += "\"moistureLevel\":" + String(moistureLevel) + ",";
+    jsonData += "\"deviceID\":\"ESP32_Irrigation_01\",";
+    jsonData += "\"timestamp\":" + String(millis() / 1000);
+    jsonData += "}";
+
+    // Send the HTTP POST request and capture the response
+    int responseCode = httpClient.POST(jsonData);
+    if (responseCode > 0) {
+      Serial.println("Data successfully sent! Response code: " + String(responseCode));
+    } else {
+      Serial.println("Failed to send data. Error code: " + String(responseCode));
+    }
+    httpClient.end();  // Close the HTTP connection
+  } else {
+    Serial.println("Wi-Fi is disconnected. Unable to send data.");
+  }
+}
